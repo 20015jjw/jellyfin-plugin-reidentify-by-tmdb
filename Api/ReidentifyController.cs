@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Net.Mime;
 using MediaBrowser.Common.Api;
@@ -38,7 +39,12 @@ public class ReidentifyController : ControllerBase
     [ProducesResponseType(StatusCodes.Status200OK)]
     public ActionResult<ReidentifyStatus> GetStatus()
     {
-        return new ReidentifyStatus(_service.DoneCount, _activity.GetRecent());
+        var current = _service.Current;
+        return new ReidentifyStatus(
+            _service.DoneCount,
+            current?.Name,
+            current is null ? null : (int)(DateTime.UtcNow - current.StartedUtc).TotalSeconds,
+            _activity.GetRecent());
     }
 
     /// <summary>
@@ -70,5 +76,7 @@ public class ReidentifyController : ControllerBase
 /// What the settings page shows besides the settings themselves.
 /// </summary>
 /// <param name="DoneCount">The number of items already re-identified.</param>
+/// <param name="CurrentItem">The item being worked on right now, or <c>null</c> when idle.</param>
+/// <param name="CurrentItemSeconds">How long the current item has been worked on.</param>
 /// <param name="Log">Recent activity, newest first.</param>
-public record ReidentifyStatus(int DoneCount, IReadOnlyList<string> Log);
+public record ReidentifyStatus(int DoneCount, string? CurrentItem, int? CurrentItemSeconds, IReadOnlyList<string> Log);

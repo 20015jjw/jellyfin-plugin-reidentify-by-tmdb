@@ -47,6 +47,16 @@
                         </div>
                     </div>
 
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="rbtItemTimeout">Time limit per item (minutes)</label>
+                        <input id="rbtItemTimeout" type="number" is="emby-input" min="0" step="1" />
+                        <div class="fieldDescription">
+                            If one movie or series takes longer than this, it is logged as failed and the run moves on;
+                            it is retried on the next task run. A long series refreshes every episode and can take
+                            10 minutes or more. 0 means no limit.
+                        </div>
+                    </div>
+
                     <div class="verticalSection">
                         <h3 class="sectionTitle">Libraries</h3>
                         <div class="fieldDescription">Tick the libraries to process. With none ticked, all libraries are processed.</div>
@@ -62,6 +72,7 @@
 
                 <div class="verticalSection" style="margin-top: 2em;">
                     <h3 class="sectionTitle">Status</h3>
+                    <div id="rbtCurrent" style="margin-bottom: 0.5em;">–</div>
                     <div><span id="rbtDoneCount">–</span> items re-identified so far. Each of these is never processed again.</div>
                     <div style="margin-top: 0.75em;">
                         <button is="emby-button" type="button" id="rbtForgetAll" class="raised emby-button">
@@ -106,6 +117,12 @@
                         var count = status.DoneCount !== undefined ? status.DoneCount : status.doneCount;
                         var log = status.Log || status.log || [];
                         page.querySelector('#rbtDoneCount').textContent = count;
+                        var current = status.CurrentItem !== undefined ? status.CurrentItem : status.currentItem;
+                        var seconds = status.CurrentItemSeconds !== undefined ? status.CurrentItemSeconds : status.currentItemSeconds;
+                        var elapsed = seconds < 60 ? seconds + ' s' : Math.floor(seconds / 60) + ' min';
+                        page.querySelector('#rbtCurrent').textContent = current
+                            ? 'Working on: ' + current + ' (' + elapsed + ')'
+                            : 'Idle: nothing is being re-identified right now.';
                         page.querySelector('#rbtLog').textContent = log.length ? log.join('\n') : 'Nothing yet.';
                     }).catch(function () {
                         page.querySelector('#rbtLog').textContent = 'Could not load the activity log.';
@@ -170,6 +187,7 @@
                         page.querySelector('#rbtEnableOnNewItems').checked = config.EnableOnNewItems;
                         page.querySelector('#rbtReplaceImages').checked = config.ReplaceImages;
                         page.querySelector('#rbtDryRun').checked = config.DryRun;
+                        page.querySelector('#rbtItemTimeout').value = config.ItemTimeoutMinutes;
                         renderLibraries(results[1] || [], config.LibraryIds || []);
                         librariesLoaded = true;
                     }).catch(function () {
@@ -202,6 +220,8 @@
                         config.EnableOnNewItems = page.querySelector('#rbtEnableOnNewItems').checked;
                         config.ReplaceImages = page.querySelector('#rbtReplaceImages').checked;
                         config.DryRun = page.querySelector('#rbtDryRun').checked;
+                        var minutes = parseInt(page.querySelector('#rbtItemTimeout').value, 10);
+                        config.ItemTimeoutMinutes = isNaN(minutes) || minutes < 0 ? 30 : minutes;
                         config.LibraryIds = Array.prototype.map.call(
                             page.querySelectorAll('.rbtLibrary:checked'),
                             function (box) { return box.value; });

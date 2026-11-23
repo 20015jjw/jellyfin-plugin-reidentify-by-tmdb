@@ -48,7 +48,8 @@ public enum ReidentifyOutcome
 /// <param name="ReplaceImages">Whether existing images are replaced.</param>
 /// <param name="DryRun">Whether to only log what would be done.</param>
 /// <param name="LibraryIds">The libraries to process; empty means all.</param>
-public sealed record ReidentifyOptions(bool ReplaceImages, bool DryRun, IReadOnlySet<Guid> LibraryIds)
+/// <param name="ItemTimeout">How long one item may take; <c>null</c> means no limit.</param>
+public sealed record ReidentifyOptions(bool ReplaceImages, bool DryRun, IReadOnlySet<Guid> LibraryIds, TimeSpan? ItemTimeout)
 {
     /// <summary>
     /// Captures the current settings.
@@ -66,9 +67,17 @@ public sealed record ReidentifyOptions(bool ReplaceImages, bool DryRun, IReadOnl
             }
         }
 
-        return new ReidentifyOptions(settings.ReplaceImages, settings.DryRun, libraries);
+        TimeSpan? timeout = settings.ItemTimeoutMinutes > 0 ? TimeSpan.FromMinutes(settings.ItemTimeoutMinutes) : null;
+        return new ReidentifyOptions(settings.ReplaceImages, settings.DryRun, libraries, timeout);
     }
 }
+
+/// <summary>
+/// The item being re-identified right now.
+/// </summary>
+/// <param name="Name">The item's name.</param>
+/// <param name="StartedUtc">When work on it started.</param>
+public sealed record CurrentWork(string Name, DateTime StartedUtc);
 
 /// <summary>
 /// Re-runs "Identify" on a movie or series using only its TMDB ID, and remembers which items
@@ -98,6 +107,7 @@ public sealed class ReidentifyService
     // and a SemaphoreSlim whose wait handle is never used holds nothing that needs disposing.
     private readonly SemaphoreSlim _oneAtATime = new(1, 1);
     private HashSet<Guid>? _done;
+    private volatile CurrentWork? _current;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ReidentifyService"/> class.
@@ -128,6 +138,11 @@ public sealed class ReidentifyService
     /// Gets the current settings.
     /// </summary>
     public static PluginConfiguration Settings => Plugin.Instance?.Configuration ?? new PluginConfiguration();
+
+    /// <summary>
+    /// Gets the item being re-identified right now, or <c>null</c> when idle.
+    /// </summary>
+    public CurrentWork? Current => _current;
 
     /// <summary>
     /// Gets the number of items recorded as done.
@@ -257,9 +272,16 @@ public sealed class ReidentifyService
             };
             searchResult.ProviderIds[_tmdbKey] = tmdbId;
 
+            // A series refreshes all its seasons and episodes before it finishes, which can take
+            // many minutes; say what is being worked on so a long item doesn't look like a hang.
+            _current = new CurrentWork(item.Name, DateTime.UtcNow);
+            _logger.LogInformation("Re-identify: working on {Name} (tmdb {TmdbId})", item.Name, tmdbId);
+            _activity.Add($"Working on: \"{item.Name}\" (tmdb {tmdbId})");
+
             // Mirrors ItemLookupController.ApplySearchCriteria.
             item.SetProviderIds(searchResult.ProviderIds);
-            await _providerManager.RefreshFullItem(
+            using var itemCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            Task refresh = _providerManager.RefreshFullItem(
                 item,
                 new MetadataRefreshOptions(new DirectoryService(_fileSystem))
                 {
@@ -270,7 +292,29 @@ public sealed class ReidentifyService
                     SearchResult = searchResult,
                     RemoveOldMetadata = true
                 },
-                cancellationToken).ConfigureAwait(false);
+                itemCancellation.Token);
+
+            if (options.ItemTimeout is { } limit)
+            {
+                try
+                {
+                    await refresh.WaitAsync(limit, cancellationToken).ConfigureAwait(false);
+                }
+                catch (TimeoutException)
+                {
+                    // Stop waiting even if the server's refresh ignores the cancellation, and make
+                    // sure whatever it throws later doesn't surface as an unobserved exception.
+                    await itemCancellation.CancelAsync().ConfigureAwait(false);
+                    _ = refresh.ContinueWith(static t => _ = t.Exception, TaskScheduler.Default);
+                    throw new TimeoutException(
+                        $"Gave up after {limit.TotalMinutes:0} minutes (the time limit in the settings). "
+                        + "It will be retried on the next task run; raise the limit if this is a very long series.");
+                }
+            }
+            else
+            {
+                await refresh.ConfigureAwait(false);
+            }
 
             var refreshed = _libraryManager.GetItemById(item.Id) ?? item;
 
@@ -293,6 +337,7 @@ public sealed class ReidentifyService
         }
         finally
         {
+            _current = null;
             _oneAtATime.Release();
         }
     }

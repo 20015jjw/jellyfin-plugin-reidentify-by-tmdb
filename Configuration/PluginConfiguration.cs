@@ -24,6 +24,12 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool DryRun { get; set; }
 
     /// <summary>
+    /// Gets or sets how many minutes one movie or series may take before it is given up on
+    /// and the run moves to the next item. 0 means no limit.
+    /// </summary>
+    public int ItemTimeoutMinutes { get; set; } = 30;
+
+    /// <summary>
     /// Gets or sets the IDs of the libraries to process. Empty means all libraries.
     /// </summary>
 #pragma warning disable CA1819 // Arrays are what the XML configuration serializer round-trips cleanly.

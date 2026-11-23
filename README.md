@@ -32,8 +32,11 @@ On the plugin's settings page:
 - **Re-identify new items automatically** (default on)
 - **Replace images** (default on): when off, only text metadata is replaced
 - **Dry run** (default off): only log what would be re-identified
+- **Time limit per item** (default 30 minutes, 0 for none): an item that takes longer is logged
+  as failed and retried on the next task run
 - **Libraries**: which libraries to process; none ticked means all
-- **Status**: how many items are done, and a button to forget them all
+- **Status**: what is being worked on right now, how many items are done, and a button to
+  forget them all
 - **Activity log**: the last 500 things the plugin did
 
 ## Before the first run
