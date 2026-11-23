@@ -1,0 +1,11 @@
+[
+  {
+    "guid": "bd87d941-d530-4dc0-8ab4-7e720426290b",
+    "name": "Reidentify by TMDB ID",
+    "description": "Re-runs Identify on each movie and series, once, using the TMDB ID already stored on the item. New items are handled automatically after the library scan that adds them; a manual scheduled task covers the existing library.",
+    "overview": "Re-identify media by TMDB ID, once per item",
+    "owner": "20015jjw",
+    "category": "Metadata",
+    "versions": []
+  }
+]

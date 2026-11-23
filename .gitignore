@@ -1,0 +1,5 @@
+bin/
+obj/
+dist/
+# Private deployment notes (LAN addresses); never publish.
+HANDOFF.md

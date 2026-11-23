@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Reidentify by TMDB ID</title>
+</head>
+<body>
+    <div id="ReidentifyByTmdbConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-checkbox">
+        <div data-role="content">
+            <div class="content-primary">
+                <form id="ReidentifyByTmdbConfigForm">
+                    <div class="verticalSection">
+                        <h2 class="sectionTitle">Reidentify by TMDB ID</h2>
+                        <div class="fieldDescription">
+                            Re-runs Identify on each movie and series using the TMDB ID already on the item, once per item.
+                            For the existing library, run "Re-identify media by TMDB ID" under Scheduled Tasks &gt; Library.
+                        </div>
+                    </div>
+
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label class="emby-checkbox-label">
+                            <input id="rbtEnableOnNewItems" type="checkbox" is="emby-checkbox" />
+                            <span>Re-identify new items automatically</span>
+                        </label>
+                        <div class="fieldDescription checkboxFieldDescription">
+                            When a library scan adds a movie or series, re-identify it once the scan has finished.
+                        </div>
+                    </div>
+
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label class="emby-checkbox-label">
+                            <input id="rbtReplaceImages" type="checkbox" is="emby-checkbox" />
+                            <span>Replace images</span>
+                        </label>
+                        <div class="fieldDescription checkboxFieldDescription">
+                            Also replace existing posters and backdrops. When off, only text metadata is replaced.
+                        </div>
+                    </div>
+
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label class="emby-checkbox-label">
+                            <input id="rbtDryRun" type="checkbox" is="emby-checkbox" />
+                            <span>Dry run</span>
+                        </label>
+                        <div class="fieldDescription checkboxFieldDescription">
+                            Only write to the activity log what would be re-identified. Nothing is changed and nothing is marked as done.
+                        </div>
+                    </div>
+
+                    <div class="verticalSection">
+                        <h3 class="sectionTitle">Libraries</h3>
+                        <div class="fieldDescription">Tick the libraries to process. With none ticked, all libraries are processed.</div>
+                        <div id="rbtLibraries" class="checkboxList paperList" style="padding: 0.5em 1em; margin-top: 0.5em;"></div>
+                    </div>
+
+                    <div>
+                        <button is="emby-button" type="submit" class="raised button-submit block emby-button">
+                            <span>Save</span>
+                        </button>
+                    </div>
+                </form>
+
+                <div class="verticalSection" style="margin-top: 2em;">
+                    <h3 class="sectionTitle">Status</h3>
+                    <div><span id="rbtDoneCount">–</span> items re-identified so far. Each of these is never processed again.</div>
+                    <div style="margin-top: 0.75em;">
+                        <button is="emby-button" type="button" id="rbtForgetAll" class="raised emby-button">
+                            <span>Forget all done items</span>
+                        </button>
+                    </div>
+                    <div class="fieldDescription">
+                        After forgetting, the next task run re-identifies the whole library again.
+                    </div>
+                </div>
+
+                <div class="verticalSection" style="margin-top: 2em;">
+                    <h3 class="sectionTitle">Activity log</h3>
+                    <div class="fieldDescription">Newest first, last 500 entries. Updates every 5 seconds while this page is open.</div>
+                    <pre id="rbtLog" style="max-height: 28em; overflow: auto; white-space: pre-wrap; word-break: break-word; padding: 1em; margin-top: 0.5em; border: 1px solid rgba(128, 128, 128, 0.4); border-radius: 0.3em; font-size: 0.9em;"></pre>
+                    <div>
+                        <button is="emby-button" type="button" id="rbtRefreshLog" class="raised emby-button">
+                            <span>Refresh</span>
+                        </button>
+                        <button is="emby-button" type="button" id="rbtClearLog" class="raised emby-button">
+                            <span>Clear log</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <script type="text/javascript">
+            (function () {
+                var pluginUniqueId = 'bd87d941-d530-4dc0-8ab4-7e720426290b';
+                var page = document.querySelector('#ReidentifyByTmdbConfigPage');
+                var timer = null;
+                // Only overwrite the saved library selection once the library list has actually been shown.
+                var librariesLoaded = false;
+
+                function post(path) {
+                    return ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('ReidentifyByTmdb/' + path) });
+                }
+
+                function loadStatus() {
+                    return ApiClient.getJSON(ApiClient.getUrl('ReidentifyByTmdb/Status')).then(function (status) {
+                        // The server's JSON casing differs between versions; accept either.
+                        var count = status.DoneCount !== undefined ? status.DoneCount : status.doneCount;
+                        var log = status.Log || status.log || [];
+                        page.querySelector('#rbtDoneCount').textContent = count;
+                        page.querySelector('#rbtLog').textContent = log.length ? log.join('\n') : 'Nothing yet.';
+                    }).catch(function () {
+                        page.querySelector('#rbtLog').textContent = 'Could not load the activity log.';
+                    });
+                }
+
+                function renderLibraries(folders, selectedIds) {
+                    var container = page.querySelector('#rbtLibraries');
+                    container.textContent = '';
+
+                    function norm(id) {
+                        return String(id || '').replace(/-/g, '').toLowerCase();
+                    }
+
+                    function addBox(id, name, checked) {
+                        var label = document.createElement('label');
+                        label.style.display = 'block';
+                        label.style.padding = '0.3em 0';
+                        var box = document.createElement('input');
+                        box.type = 'checkbox';
+                        box.className = 'rbtLibrary';
+                        box.value = id;
+                        box.checked = checked;
+                        var text = document.createElement('span');
+                        text.textContent = ' ' + name;
+                        label.appendChild(box);
+                        label.appendChild(text);
+                        container.appendChild(label);
+                    }
+
+                    var selected = selectedIds.map(norm);
+                    var known = [];
+                    folders.forEach(function (folder) {
+                        known.push(norm(folder.ItemId));
+                        var isSelected = selected.indexOf(norm(folder.ItemId)) !== -1;
+                        // Only movie, show and mixed-content libraries can hold movies or series.
+                        var type = folder.CollectionType;
+                        if (!isSelected && type && type !== 'movies' && type !== 'tvshows' && type !== 'mixed') {
+                            return;
+                        }
+
+                        addBox(folder.ItemId, folder.Name, isSelected);
+                    });
+
+                    // A selected library that no longer exists still restricts processing, so show it
+                    // (ticked) rather than letting the page look like "all libraries".
+                    selectedIds.forEach(function (id) {
+                        if (known.indexOf(norm(id)) === -1) {
+                            addBox(id, 'Library that no longer exists (untick and save to remove)', true);
+                        }
+                    });
+                }
+
+                page.addEventListener('pageshow', function () {
+                    librariesLoaded = false;
+                    Dashboard.showLoadingMsg();
+                    Promise.all([
+                        ApiClient.getPluginConfiguration(pluginUniqueId),
+                        ApiClient.getJSON(ApiClient.getUrl('Library/VirtualFolders'))
+                    ]).then(function (results) {
+                        var config = results[0];
+                        page.querySelector('#rbtEnableOnNewItems').checked = config.EnableOnNewItems;
+                        page.querySelector('#rbtReplaceImages').checked = config.ReplaceImages;
+                        page.querySelector('#rbtDryRun').checked = config.DryRun;
+                        renderLibraries(results[1] || [], config.LibraryIds || []);
+                        librariesLoaded = true;
+                    }).catch(function () {
+                        page.querySelector('#rbtLibraries').textContent =
+                            'Could not load the settings or the library list. Reload the page before saving.';
+                    }).finally(function () {
+                        Dashboard.hideLoadingMsg();
+                    });
+
+                    loadStatus();
+                    clearInterval(timer);
+                    timer = setInterval(loadStatus, 5000);
+                });
+
+                page.addEventListener('pagehide', function () {
+                    clearInterval(timer);
+                    timer = null;
+                });
+
+                page.querySelector('#ReidentifyByTmdbConfigForm').addEventListener('submit', function (e) {
+                    e.preventDefault();
+                    if (!librariesLoaded) {
+                        // Saving now would write the unticked defaults over the real settings.
+                        Dashboard.alert('The settings have not finished loading. Reload the page and try again.');
+                        return false;
+                    }
+
+                    Dashboard.showLoadingMsg();
+                    ApiClient.getPluginConfiguration(pluginUniqueId).then(function (config) {
+                        config.EnableOnNewItems = page.querySelector('#rbtEnableOnNewItems').checked;
+                        config.ReplaceImages = page.querySelector('#rbtReplaceImages').checked;
+                        config.DryRun = page.querySelector('#rbtDryRun').checked;
+                        config.LibraryIds = Array.prototype.map.call(
+                            page.querySelectorAll('.rbtLibrary:checked'),
+                            function (box) { return box.value; });
+                        ApiClient.updatePluginConfiguration(pluginUniqueId, config).then(function (result) {
+                            Dashboard.processPluginConfigurationUpdateResult(result);
+                        });
+                    });
+                    return false;
+                });
+
+                page.querySelector('#rbtRefreshLog').addEventListener('click', loadStatus);
+
+                page.querySelector('#rbtClearLog').addEventListener('click', function () {
+                    post('ClearLog').then(loadStatus);
+                });
+
+                page.querySelector('#rbtForgetAll').addEventListener('click', function () {
+                    if (window.confirm('Forget all done items? The next task run will re-identify the whole library again.')) {
+                        post('ForgetAll').then(loadStatus);
+                    }
+                });
+            })();
+        </script>
+    </div>
+</body>
+</html>
